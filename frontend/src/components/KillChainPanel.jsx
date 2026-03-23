@@ -18,11 +18,110 @@ const THREAT_COLOR = {
   CRITICAL: 'var(--red)',
 }
 
+function ConfidenceBar({ value }) {
+  const color = value >= 75 ? 'var(--green)' : value >= 50 ? 'var(--amber)' : 'var(--red)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ flex: 1, height: '3px', background: 'var(--border)', borderRadius: '2px' }}>
+        <div style={{ width: `${value}%`, height: '100%', background: color, borderRadius: '2px', transition: 'width 0.4s ease' }} />
+      </div>
+      <span style={{ fontSize: '10px', color, fontWeight: 700, minWidth: '34px', textAlign: 'right' }}>
+        {value}%
+      </span>
+    </div>
+  )
+}
+
+function ContactCard({ contact, onEngage, onDismiss }) {
+  const threatColor = THREAT_COLOR[contact.threat_level] || 'var(--green)'
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--amber)',
+      borderRadius: '3px',
+      padding: '10px',
+      marginBottom: '6px',
+    }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: '11px', letterSpacing: '0.1em' }}>
+            {contact.contact_id}
+          </span>
+          <span style={{ fontSize: '9px', color: 'var(--text-dim)', letterSpacing: '0.06em' }}>
+            ▶ {contact.drone_id}
+          </span>
+        </div>
+        <span style={{
+          fontSize: '9px', padding: '2px 6px',
+          border: `1px solid ${threatColor}`, color: threatColor,
+          letterSpacing: '0.1em',
+          animation: contact.threat_level === 'CRITICAL' ? 'pulse-red 1.2s ease-in-out infinite' : 'none',
+        }}>
+          {contact.threat_level}
+        </span>
+      </div>
+
+      {/* Intel row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+        <div>
+          <div style={{ fontSize: '8px', color: 'var(--text-dim)', letterSpacing: '0.08em', marginBottom: '2px' }}>
+            POSITION
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+            ({contact.x}, {contact.y})
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '8px', color: 'var(--text-dim)', letterSpacing: '0.08em', marginBottom: '2px' }}>
+            DETECTED
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+            {contact.detected_at}
+          </div>
+        </div>
+      </div>
+
+      {/* Confidence */}
+      <div style={{ marginBottom: '8px' }}>
+        <div style={{ fontSize: '8px', color: 'var(--text-dim)', letterSpacing: '0.08em', marginBottom: '4px' }}>
+          AI CONFIDENCE SCORE
+        </div>
+        <ConfidenceBar value={contact.confidence} />
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '6px' }}>
+        <button
+          onClick={() => onEngage(contact.contact_id)}
+          style={{
+            flex: 1, padding: '5px', fontFamily: 'inherit', fontSize: '9px',
+            letterSpacing: '0.12em', cursor: 'pointer', borderRadius: '2px',
+            background: 'rgba(255,68,68,0.12)', border: '1px solid var(--red)',
+            color: 'var(--red)', fontWeight: 700,
+          }}
+        >
+          ◈ ENGAGE
+        </button>
+        <button
+          onClick={() => onDismiss(contact.contact_id)}
+          style={{
+            flex: 1, padding: '5px', fontFamily: 'inherit', fontSize: '9px',
+            letterSpacing: '0.12em', cursor: 'pointer', borderRadius: '2px',
+            background: 'transparent', border: '1px solid var(--border)',
+            color: 'var(--text-dim)',
+          }}
+        >
+          ✕ DISMISS
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function KillChainCard({ chain }) {
-  const currentIdx = STAGES.indexOf(chain.stage)
-  const progress   = chain.active
-    ? Math.round(((currentIdx + 1) / STAGES.length) * 100)
-    : 100
+  const currentIdx  = STAGES.indexOf(chain.stage)
+  const progress    = chain.active ? Math.round(((currentIdx + 1) / STAGES.length) * 100) : 100
   const threatColor = THREAT_COLOR[chain.threat_level] || 'var(--green)'
 
   return (
@@ -33,21 +132,17 @@ function KillChainCard({ chain }) {
       padding: '10px',
       marginBottom: '8px',
     }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: '11px', letterSpacing: '0.1em' }}>
             {chain.contact_id}
           </span>
-          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
-            ▶ {chain.drone_id}
-          </span>
+          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>▶ {chain.drone_id}</span>
         </div>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <span style={{
             fontSize: '9px', padding: '2px 7px',
-            border: `1px solid ${threatColor}`,
-            color: threatColor, letterSpacing: '0.1em',
+            border: `1px solid ${threatColor}`, color: threatColor, letterSpacing: '0.1em',
             animation: chain.threat_level === 'CRITICAL' ? 'pulse-red 1.2s ease-in-out infinite' : 'none',
           }}>
             {chain.threat_level}
@@ -59,7 +154,6 @@ function KillChainCard({ chain }) {
         </div>
       </div>
 
-      {/* Stage pipeline */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '2px', marginBottom: '6px' }}>
         {STAGES.map((stage, i) => {
           const isPast    = i < currentIdx || !chain.active
@@ -68,8 +162,7 @@ function KillChainCard({ chain }) {
             <React.Fragment key={stage}>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: '8px', letterSpacing: '0.04em',
-                  padding: '3px 4px',
+                  fontSize: '8px', letterSpacing: '0.04em', padding: '3px 4px',
                   border: `1px solid ${isCurrent ? 'var(--green)' : isPast ? 'rgba(0,255,136,0.35)' : 'var(--border)'}`,
                   color: isCurrent ? 'var(--green)' : isPast ? 'rgba(0,255,136,0.55)' : 'var(--text-dim)',
                   background: isCurrent ? 'rgba(0,255,136,0.08)' : 'transparent',
@@ -85,7 +178,7 @@ function KillChainCard({ chain }) {
               </div>
               {i < STAGES.length - 1 && (
                 <div style={{
-                  color: (i < currentIdx || (!chain.active)) ? 'rgba(0,255,136,0.4)' : 'var(--border)',
+                  color: (i < currentIdx || !chain.active) ? 'rgba(0,255,136,0.4)' : 'var(--border)',
                   fontSize: '9px', flexShrink: 0, paddingTop: '4px', paddingLeft: '1px', paddingRight: '1px',
                 }}>▸</div>
               )}
@@ -94,7 +187,6 @@ function KillChainCard({ chain }) {
         })}
       </div>
 
-      {/* Progress bar */}
       <div style={{ height: '2px', background: 'var(--border)', borderRadius: '1px', marginBottom: '6px' }}>
         <div style={{
           height: '100%', width: `${progress}%`,
@@ -103,7 +195,6 @@ function KillChainCard({ chain }) {
         }} />
       </div>
 
-      {/* Description */}
       <div style={{ fontSize: '9px', color: 'var(--text-secondary)', letterSpacing: '0.04em', fontStyle: 'italic' }}>
         {chain.active ? STAGE_DESC[chain.stage] : 'Kill chain sequence complete.'}
       </div>
@@ -111,9 +202,12 @@ function KillChainCard({ chain }) {
   )
 }
 
-export default function KillChainPanel({ killChains, drones, onTriggerKillChain }) {
+export default function KillChainPanel({ killChains, contacts = [], onTriggerKillChain, onDismissContact }) {
+  const pending  = contacts.filter(c => c.status === 'PENDING')
   const active   = killChains.filter(c => c.active)
   const archived = killChains.filter(c => !c.active)
+
+  const isEmpty = pending.length === 0 && killChains.length === 0
 
   return (
     <div className="panel">
@@ -122,61 +216,53 @@ export default function KillChainPanel({ killChains, drones, onTriggerKillChain 
           KILL CHAIN CONSOLE
         </span>
         <span className="panel__badge" style={{
-          color: active.length > 0 ? 'var(--red)' : 'var(--text-dim)',
-          borderColor: active.length > 0 ? 'var(--red)' : 'var(--text-dim)',
-          animation: active.length > 0 ? 'pulse-red 1.5s ease-in-out infinite' : 'none',
+          color: pending.length > 0 ? 'var(--amber)' : active.length > 0 ? 'var(--red)' : 'var(--text-dim)',
+          borderColor: pending.length > 0 ? 'var(--amber)' : active.length > 0 ? 'var(--red)' : 'var(--text-dim)',
+          animation: (pending.length > 0 || active.length > 0) ? 'pulse-amber 1.5s ease-in-out infinite' : 'none',
         }}>
-          {active.length} ACTIVE
+          {pending.length > 0 ? `${pending.length} PENDING` : `${active.length} ACTIVE`}
         </span>
       </div>
 
       <div className="panel__body">
 
-        {/* Trigger controls */}
-        <div>
-          <div className="section-label" style={{ marginBottom: '6px' }}>INITIATE KILL CHAIN</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-            {drones.map(drone => (
-              <button
-                key={drone.id}
-                onClick={() => onTriggerKillChain(drone.id)}
-                style={{
-                  background: drone.kill_chain_stage ? 'rgba(255,68,68,0.1)' : 'var(--bg-card)',
-                  border: `1px solid ${drone.kill_chain_stage ? 'var(--red)' : 'var(--border)'}`,
-                  color: drone.kill_chain_stage ? 'var(--red)' : 'var(--text-secondary)',
-                  fontFamily: 'inherit', fontSize: '9px', letterSpacing: '0.08em',
-                  padding: '4px 8px', cursor: 'pointer', borderRadius: '2px',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {drone.id.replace('HUNTER-', 'H-')}
-                {drone.kill_chain_stage && ` ◈ ${drone.kill_chain_stage}`}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: '9px', color: 'var(--text-dim)', marginTop: '5px', letterSpacing: '0.06em' }}>
-            Select any drone to initiate a new kill chain sequence
-          </div>
-        </div>
-
-        <div className="divider" />
-
         {/* Empty state */}
-        {killChains.length === 0 && (
+        {isEmpty && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             justifyContent: 'center', padding: '40px 20px', gap: '10px',
             color: 'var(--text-dim)', textAlign: 'center',
           }}>
             <div style={{ fontSize: '28px', opacity: 0.25 }}>◎</div>
-            <div style={{ fontSize: '10px', letterSpacing: '0.15em' }}>NO KILL CHAINS ACTIVE</div>
-            <div style={{ fontSize: '9px', opacity: 0.6 }}>Assign a drone above to initiate</div>
+            <div style={{ fontSize: '10px', letterSpacing: '0.15em' }}>NO CONTACTS DETECTED</div>
+            <div style={{ fontSize: '9px', opacity: 0.6 }}>Deploy drones on surveillance or patrol missions to begin area scanning</div>
           </div>
         )}
 
-        {/* Active chains */}
+        {/* Pending contacts awaiting operator decision */}
+        {pending.length > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <div className="section-label" style={{ marginBottom: '6px', color: 'var(--amber)', letterSpacing: '0.2em', animation: 'pulse-amber 1.5s ease-in-out infinite' }}>
+              ⚠ CONTACTS AWAITING ASSESSMENT
+            </div>
+            {pending.map(c => (
+              <ContactCard
+                key={c.contact_id}
+                contact={c}
+                onEngage={onTriggerKillChain}
+                onDismiss={onDismissContact}
+              />
+            ))}
+          </div>
+        )}
+
+        {(pending.length > 0 && (active.length > 0 || archived.length > 0)) && (
+          <div className="divider" />
+        )}
+
+        {/* Active kill chains */}
         {active.length > 0 && (
-          <div>
+          <div style={{ marginBottom: '8px' }}>
             <div className="section-label" style={{ marginBottom: '6px', color: 'var(--red)', letterSpacing: '0.2em' }}>
               ● ACTIVE CHAINS
             </div>

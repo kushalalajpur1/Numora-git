@@ -46,6 +46,7 @@ export default function App() {
   const [surfaceHoldInterval, setSurfaceHoldInterval] = useState(60)
   const [colWidths, setColWidths]                     = useState({ left: 280, right: 340 })
   const [killChains, setKillChains]                   = useState([])
+  const [contacts, setContacts]                       = useState([])
   const [activeRightTab, setActiveRightTab]           = useState('SWARM')
 
   const connect = useCallback(() => {
@@ -80,6 +81,7 @@ export default function App() {
           setSurfaceHoldInterval(msg.data.surface_hold_interval ?? 60)
           setPendingCommands(msg.data.pending_commands ?? {})
           setKillChains(msg.data.kill_chains ?? [])
+          setContacts(msg.data.contacts ?? [])
           break
 
         case 'queue_update':
@@ -118,6 +120,15 @@ export default function App() {
         case 'ascent_status':
           setScheduledAscentTime(msg.data.scheduled_time ?? null)
           if (msg.data.ascent_interval != null) setAscentInterval(msg.data.ascent_interval)
+          break
+
+        case 'contact_detected':
+          setContacts(prev => [...prev, msg.data])
+          setActiveRightTab('KILL_CHAIN')
+          break
+
+        case 'contact_update':
+          setContacts(prev => prev.map(c => c.contact_id === msg.data.contact_id ? msg.data : c))
           break
 
         case 'kill_chain_update': {
@@ -214,9 +225,14 @@ export default function App() {
     setTxStatus(mode === 'immediate' ? 'ASCENDING...' : mode === 'cancel' ? 'SCHEDULE CLEARED' : `SCHEDULED ${time}`)
   }, [])
 
-  const triggerKillChain = useCallback((droneId) => {
+  const triggerKillChain = useCallback((contactId) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    wsRef.current.send(JSON.stringify({ type: 'trigger_kill_chain', data: { drone_id: droneId } }))
+    wsRef.current.send(JSON.stringify({ type: 'trigger_kill_chain', data: { contact_id: contactId } }))
+  }, [])
+
+  const dismissContact = useCallback((contactId) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(JSON.stringify({ type: 'dismiss_contact', data: { contact_id: contactId } }))
   }, [])
 
   const setDroneTarget = useCallback((id, x, y, taskType = 'SURVEILLANCE', duration = 20) => {
@@ -269,7 +285,7 @@ export default function App() {
         <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto', marginRight: '12px' }}>
           {[
             { key: 'SWARM', label: 'SWARM' },
-            { key: 'KILL_CHAIN', label: 'KILL CHAIN', count: killChains.filter(c => c.active).length },
+            { key: 'KILL_CHAIN', label: 'KILL CHAIN', count: contacts.filter(c => c.status === 'PENDING').length + killChains.filter(c => c.active).length },
           ].map(({ key, label, count }) => {
             const isActive = activeRightTab === key
             const hasAlert = count > 0
@@ -358,8 +374,9 @@ export default function App() {
         ) : (
           <KillChainPanel
             killChains={killChains}
-            drones={drones}
+            contacts={contacts}
             onTriggerKillChain={triggerKillChain}
+            onDismissContact={dismissContact}
           />
         )}
       </div>

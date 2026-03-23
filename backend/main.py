@@ -10,7 +10,6 @@ import random
 import time
 import os
 import httpx
-import anthropic
 from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Optional
@@ -119,6 +118,10 @@ class NUMORAState:
         # Kill chain
         self.kill_chains: dict = {}                # contact_id -> chain dict
         self._kill_chain_counter: int = 0
+        # Detected contacts awaiting operator decision
+        self.contacts: dict = {}                   # contact_id -> contact dict
+        self._contact_counter: int = 0
+        self._drone_detect_times: dict = {}        # drone_id -> last detection timestamp
 
 state = NUMORAState()
 connected_clients: list[WebSocket] = []
@@ -373,6 +376,46 @@ async def dispatch_drones(mission: dict):
         state.drones[key]["status"] = DroneStatus.IDLE
 
 
+# ── Contact Detection ─────────────────────────────────────────────────────────
+
+async def _maybe_detect_contact(drone_id: str, base_confidence: float):
+    """Randomly detect a contact near the drone's current position."""
+    now = time.time()
+    # Cooldown: at most one detection per drone every 15 seconds
+    if now - state._drone_detect_times.get(drone_id, 0) < 15:
+        return
+    # ~25% chance when cooldown clears
+    if random.random() > 0.25:
+        return
+
+    drone = state.drones.get(drone_id)
+    if not drone:
+        return
+
+    state._drone_detect_times[drone_id] = now
+    state._contact_counter += 1
+    contact_id = f"TGT-{state._contact_counter:04d}"
+
+    confidence  = round(min(97, max(38, random.gauss(base_confidence, 10))), 1)
+    threat_level = random.choices(
+        ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        weights=[30, 35, 25, 10],
+    )[0]
+
+    contact = {
+        "contact_id":   contact_id,
+        "drone_id":     drone_id,
+        "x":            round(drone["x"] + random.uniform(-15, 15), 1),
+        "y":            round(drone["y"] + random.uniform(-15, 15), 1),
+        "confidence":   confidence,
+        "threat_level": threat_level,
+        "status":       "PENDING",
+        "detected_at":  time.strftime("%H:%M:%S", time.localtime()),
+    }
+    state.contacts[contact_id] = contact
+    await broadcast("contact_detected", contact)
+
+
 # ── Task behaviour helpers ────────────────────────────────────────────────────
 
 async def _travel(drone, sx, sy, tx, ty, speed):
@@ -391,6 +434,7 @@ async def _run_surveillance(drone, tx, ty, duration):
     """Slow orbit around target point."""
     drone["status"] = DroneStatus.SURVEILLING
     radius, angle   = 25.0, 0.0
+    orbit_steps     = 0
     start = time.time()
     while time.time() - start < duration:
         angle           += 0.08
@@ -398,6 +442,10 @@ async def _run_surveillance(drone, tx, ty, duration):
         drone["y"]       = ty + math.sin(angle) * radius
         drone["depth"]   = 35.0 + random.uniform(-3, 3)
         drone["battery"] = max(10.0, drone["battery"] - 0.004)
+        orbit_steps     += 1
+        # Check for contact once per orbit (~78 steps for full circle)
+        if orbit_steps % 78 == 0:
+            await _maybe_detect_contact(drone["id"], 72)
         await asyncio.sleep(0.15)
 
 
@@ -417,6 +465,8 @@ async def _run_patrol(drone, tx, ty, duration):
                 drone["y"]       = oy + (py - oy) * e
                 drone["battery"] = max(10.0, drone["battery"] - 0.006)
                 await asyncio.sleep(0.18)
+            # Check for contact at end of each patrol leg
+            await _maybe_detect_contact(drone["id"], 58)
 
 
 async def _run_recon(drone, tx, ty, duration):
@@ -436,6 +486,8 @@ async def _run_recon(drone, tx, ty, duration):
                 drone["depth"]   = 30.0 + random.uniform(-5, 5)
                 drone["battery"] = max(10.0, drone["battery"] - 0.012)
                 await asyncio.sleep(0.1)
+            # Recon gives higher confidence detections
+            await _maybe_detect_contact(drone["id"], 84)
 
 
 async def _run_mine_detection(drone, tx, ty, duration):
@@ -569,58 +621,60 @@ async def run_kill_chain(contact_id: str, drone_id: str):
         "active":       False,
     })
 
-# ─── Chat API Endpoint (Claude) ──────────────────────────────────────────────
+# ─── Chat API Endpoint (Gemini) ──────────────────────────────────────────────
 
-_CHAT_TOOLS = [
-    {
-        "name": "queue_drone_command",
-        "description": (
-            "Queue a task command for a specific drone. "
-            "Only call this when you have a confirmed drone ID, task type, and target coordinates."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "drone_id": {
-                    "type": "string",
-                    "enum": ["HUNTER-01", "HUNTER-02", "HUNTER-03", "HUNTER-04", "HUNTER-05"],
-                    "description": "The drone to command",
+_GEMINI_TOOLS = {
+    "function_declarations": [
+        {
+            "name": "queue_drone_command",
+            "description": (
+                "Queue a task command for a specific drone. "
+                "Only call this when you have a confirmed drone ID, task type, and target coordinates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "drone_id": {
+                        "type": "string",
+                        "enum": ["HUNTER-01", "HUNTER-02", "HUNTER-03", "HUNTER-04", "HUNTER-05"],
+                        "description": "The drone to command",
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "enum": ["SURVEILLANCE", "PERIMETER PATROL", "RECON", "MINE DETECTION"],
+                        "description": "The task to execute",
+                    },
+                    "target_x": {"type": "number", "description": "Target X coordinate"},
+                    "target_y": {"type": "number", "description": "Target Y coordinate"},
+                    "duration":  {"type": "number", "description": "Task hold duration in seconds (default 120)"},
                 },
-                "task_type": {
-                    "type": "string",
-                    "enum": ["SURVEILLANCE", "PERIMETER PATROL", "RECON", "MINE DETECTION"],
-                    "description": "The task to execute",
+                "required": ["drone_id", "task_type", "target_x", "target_y"],
+            },
+        },
+        {
+            "name": "set_mothership_waypoint",
+            "description": (
+                "Set a navigation waypoint for the mothership. "
+                "Only call this when specific coordinates are confirmed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number", "description": "Waypoint X coordinate"},
+                    "y": {"type": "number", "description": "Waypoint Y coordinate"},
                 },
-                "target_x": {"type": "number", "description": "Target X coordinate"},
-                "target_y": {"type": "number", "description": "Target Y coordinate"},
-                "duration": {"type": "number", "description": "Task hold duration in seconds (default 120)"},
+                "required": ["x", "y"],
             },
-            "required": ["drone_id", "task_type", "target_x", "target_y"],
         },
-    },
-    {
-        "name": "set_mothership_waypoint",
-        "description": (
-            "Set a navigation waypoint for the mothership. "
-            "Only call this when specific coordinates are confirmed."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "x": {"type": "number", "description": "Waypoint X coordinate"},
-                "y": {"type": "number", "description": "Waypoint Y coordinate"},
-            },
-            "required": ["x", "y"],
-        },
-    },
-]
+    ]
+}
 
 @app.post("/api/chat")
 async def chat_endpoint(body: dict):
     try:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key or api_key == "your-anthropic-api-key-here":
-            return {"error": "ANTHROPIC_API_KEY not configured in backend/.env", "status": 500}
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"error": "GEMINI_API_KEY not configured in backend/.env", "status": 500}
 
         system_state = body.get("system_state", {})
         messages     = body.get("messages", [])
@@ -631,30 +685,43 @@ async def chat_endpoint(body: dict):
             "Be concise and use operational language.\n\n"
             f"Current system state:\n{json.dumps(system_state, indent=2)}\n\n"
             "When you have enough information to issue a specific command (drone ID, coordinates, "
-            "task type) use the appropriate tool. Otherwise ask for clarification."
+            "task type) use the appropriate function. Otherwise ask for clarification."
         )
 
-        client   = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=1024,
-            system=system_prompt,
-            tools=_CHAT_TOOLS,
-            messages=messages,
-        )
+        # Convert messages to Gemini format (role: user/model)
+        gemini_contents = []
+        for m in messages:
+            role = "model" if m["role"] == "assistant" else "user"
+            gemini_contents.append({"role": role, "parts": [{"text": m["content"]}]})
+
+        payload = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": gemini_contents,
+            "tools": [_GEMINI_TOOLS],
+            "generationConfig": {"maxOutputTokens": 1024},
+        }
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
 
         text    = ""
         command = None
-        for block in response.content:
-            if block.type == "text":
-                text = block.text
-            elif block.type == "tool_use":
-                command = {"type": block.name, **block.input}
+        parts   = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        for part in parts:
+            if "text" in part:
+                text = part["text"]
+            elif "functionCall" in part:
+                fc      = part["functionCall"]
+                command = {"type": fc["name"], **fc.get("args", {})}
 
         return {"text": text, "command": command}
 
-    except anthropic.AuthenticationError:
-        return {"error": "Invalid ANTHROPIC_API_KEY — check backend/.env", "status": 401}
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        return {"error": f"Gemini API error: {detail}", "status": e.response.status_code}
     except Exception as e:
         return {"error": f"Backend error: {str(e)}", "status": 500}
 
@@ -679,6 +746,7 @@ async def websocket_endpoint(ws: WebSocket):
             "surface_hold_interval": state.surface_hold_interval,
             "pending_commands": {k: v["task_type"] for k, v in state.pending_drone_commands.items()},
             "kill_chains": list(state.kill_chains.values()),
+            "contacts":    list(state.contacts.values()),
         },
         "ts": time.time(),
     }))
@@ -877,21 +945,35 @@ async def websocket_endpoint(ws: WebSocket):
                 }))
 
             elif msg.get("type") == "trigger_kill_chain":
-                data     = msg["data"]
-                drone_id = data.get("drone_id")
-                if drone_id not in state.drones:
+                data       = msg["data"]
+                contact_id = data.get("contact_id")
+                contact    = state.contacts.get(contact_id)
+                if not contact or contact["status"] != "PENDING":
                     await ws.send_text(json.dumps({
                         "type": "error",
-                        "data": {"message": f"DRONE {drone_id} NOT FOUND"},
+                        "data": {"message": f"CONTACT {contact_id} NOT FOUND OR ALREADY ACTIONED"},
                         "ts": time.time(),
                     }))
                 else:
-                    state._kill_chain_counter += 1
-                    contact_id = f"CONTACT-{state._kill_chain_counter:04d}"
-                    asyncio.create_task(run_kill_chain(contact_id, drone_id))
+                    contact["status"] = "ENGAGED"
+                    await broadcast("contact_update", contact)
+                    asyncio.create_task(run_kill_chain(contact_id, contact["drone_id"]))
                     await ws.send_text(json.dumps({
                         "type": "ack",
-                        "data": {"message": f"KILL CHAIN INITIATED — {contact_id} VIA {drone_id}"},
+                        "data": {"message": f"KILL CHAIN INITIATED — {contact_id}"},
+                        "ts": time.time(),
+                    }))
+
+            elif msg.get("type") == "dismiss_contact":
+                data       = msg["data"]
+                contact_id = data.get("contact_id")
+                contact    = state.contacts.get(contact_id)
+                if contact and contact["status"] == "PENDING":
+                    contact["status"] = "DISMISSED"
+                    await broadcast("contact_update", contact)
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": f"CONTACT {contact_id} DISMISSED"},
                         "ts": time.time(),
                     }))
 
