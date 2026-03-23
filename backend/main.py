@@ -16,6 +16,8 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 try:
     from dotenv import load_dotenv
@@ -118,6 +120,7 @@ class NUMORAState:
         # Kill chain
         self.kill_chains: dict = {}                # contact_id -> chain dict
         self._kill_chain_counter: int = 0
+        self._drone_counter: int = 5               # highest drone number created so far
         # Detected contacts awaiting operator decision
         self.contacts: dict = {}                   # contact_id -> contact dict
         self._contact_counter: int = 0
@@ -680,12 +683,37 @@ async def chat_endpoint(body: dict):
         messages     = body.get("messages", [])
 
         system_prompt = (
-            "You are an AI tactical advisor for the NUMORA Autonomous Underwater Swarm System. "
-            "You help operators manage underwater drones and a mothership. "
-            "Be concise and use operational language.\n\n"
-            f"Current system state:\n{json.dumps(system_state, indent=2)}\n\n"
-            "When you have enough information to issue a specific command (drone ID, coordinates, "
-            "task type) use the appropriate function. Otherwise ask for clarification."
+            "You are NUMORA-AI, tactical advisor for the NUMORA Autonomous Underwater Swarm System. "
+            "Respond in concise operational language.\n\n"
+
+            "## COORDINATE SYSTEM\n"
+            "All positions use a local tactical grid where 1 unit = 100 metres. "
+            "Origin (0, 0) is the mothership home base. "
+            "Positive X = East, Negative X = West, Positive Y = South, Negative Y = North. "
+            "Normal operating radius is ±200 units (~20 km from base). "
+            "Coordinates may be given as '(X, Y)', 'X Y', or inferred from a named location.\n\n"
+
+            "## GEOGRAPHIC REFERENCE\n"
+            "The operational theater is the Eastern North Atlantic. "
+            "When an operator names a country, region, or maritime zone, map it to the "
+            "corresponding tactical sector below and pick a representative coordinate within it:\n"
+            "  UK / English Channel approaches  → x: 120–200,  y: −200 to −100\n"
+            "  Norway / Norwegian Sea            → x: 120–180,  y: −260 to −180\n"
+            "  France / Bay of Biscay            → x: 80–180,   y: −80 to 0\n"
+            "  Spain / Portugal / Iberia         → x: 80–160,   y: 0 to 100\n"
+            "  Gibraltar / Mediterranean entry   → x: 100–180,  y: 100 to 180\n"
+            "  Morocco / North Africa            → x: 80–160,   y: 160 to 240\n"
+            "  Canary Islands                    → x: 40–120,   y: 200 to 280\n"
+            "  Azores / Mid-Atlantic             → x: −60 to 40, y: 20 to 100\n"
+            "  US / Canadian East Coast          → x: −280 to −140, y: −60 to 120\n"
+            "  Open Atlantic (default)           → x: −100 to 100, y: −100 to 100\n"
+            "Use the midpoint of the range unless the operator specifies a particular coast, "
+            "strait, or approach. If unsure, ask which part of the region.\n\n"
+
+            f"## CURRENT SYSTEM STATE\n{json.dumps(system_state, indent=2)}\n\n"
+
+            "When you have a confirmed drone ID, task type, and target coordinates, call the "
+            "appropriate function. Otherwise ask for clarification."
         )
 
         # Convert messages to Gemini format (role: user/model)
@@ -977,6 +1005,68 @@ async def websocket_endpoint(ws: WebSocket):
                         "ts": time.time(),
                     }))
 
+            elif msg.get("type") == "add_drone":
+                if len(state.drones) >= 20:
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": "MAX SWARM SIZE REACHED (10 UNITS)"},
+                        "ts": time.time(),
+                    }))
+                else:
+                    state._drone_counter += 1
+                    new_id = f"HUNTER-{state._drone_counter:02d}"
+                    new_drone = {
+                        "id":              new_id,
+                        "status":          DroneStatus.IDLE,
+                        "battery":         round(random.uniform(88, 99), 1),
+                        "depth":           round(random.uniform(30, 60), 1),
+                        "x":               0.0,
+                        "y":               0.0,
+                        "target_x":        0.0,
+                        "target_y":        0.0,
+                        "kill_chain_stage": None,
+                    }
+                    state.drones[new_id] = new_drone
+                    await broadcast("drone_added", new_drone)
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": f"{new_id} DEPLOYED TO SWARM"},
+                        "ts": time.time(),
+                    }))
+
+            elif msg.get("type") == "remove_drone":
+                data     = msg["data"]
+                drone_id = data.get("drone_id")
+                drone    = state.drones.get(drone_id)
+                if not drone:
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": f"DRONE {drone_id} NOT FOUND"},
+                        "ts": time.time(),
+                    }))
+                elif drone["status"] != DroneStatus.IDLE:
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": f"CANNOT REMOVE {drone_id} — NOT IDLE"},
+                        "ts": time.time(),
+                    }))
+                elif len(state.drones) <= 1:
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": "MINIMUM SWARM SIZE IS 1 UNIT"},
+                        "ts": time.time(),
+                    }))
+                else:
+                    del state.drones[drone_id]
+                    state.pending_drone_commands.pop(drone_id, None)
+                    state._drone_detect_times.pop(drone_id, None)
+                    await broadcast("drone_removed", {"id": drone_id})
+                    await ws.send_text(json.dumps({
+                        "type": "ack",
+                        "data": {"message": f"{drone_id} REMOVED FROM SWARM"},
+                        "ts": time.time(),
+                    }))
+
             elif msg.get("type") == "set_drone_target":
                 data     = msg["data"]
                 drone_id = data["id"]
@@ -1007,7 +1097,20 @@ async def websocket_endpoint(ws: WebSocket):
         if ws in connected_clients:
             connected_clients.remove(ws)
 
+# ─── Static frontend (production build) ──────────────────────────────────────
+
+_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+if os.path.isdir(_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_DIST, "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(_full_path: str):
+        index = os.path.join(_DIST, "index.html")
+        return FileResponse(index)
+
 # ─── Startup ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

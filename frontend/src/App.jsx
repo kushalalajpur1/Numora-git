@@ -5,7 +5,9 @@ import SwarmStatus      from './components/SwarmStatus.jsx'
 import KillChainPanel   from './components/KillChainPanel.jsx'
 import './App.css'
 
-const WS_URL = 'ws://localhost:8000/ws'
+const WS_URL = import.meta.env.DEV
+  ? 'ws://localhost:8000/ws'
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
 
 const INITIAL_DRONES = Array.from({ length: 5 }, (_, i) => ({
   id:      `HUNTER-${String(i + 1).padStart(2, '0')}`,
@@ -98,6 +100,14 @@ export default function App() {
 
         case 'drone_update':
           setDrones(prev => prev.map(d => d.id === msg.data.id ? { ...msg.data } : d))
+          break
+
+        case 'drone_added':
+          setDrones(prev => [...prev, msg.data])
+          break
+
+        case 'drone_removed':
+          setDrones(prev => prev.filter(d => d.id !== msg.data.id))
           break
 
         case 'drone_uplink':
@@ -235,6 +245,16 @@ export default function App() {
     wsRef.current.send(JSON.stringify({ type: 'dismiss_contact', data: { contact_id: contactId } }))
   }, [])
 
+  const addDrone = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(JSON.stringify({ type: 'add_drone', data: {} }))
+  }, [])
+
+  const removeDrone = useCallback((droneId) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(JSON.stringify({ type: 'remove_drone', data: { drone_id: droneId } }))
+  }, [])
+
   const setDroneTarget = useCallback((id, x, y, taskType = 'SURVEILLANCE', duration = 20) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setTxStatus('ERROR: NO UPLINK')
@@ -370,6 +390,8 @@ export default function App() {
             onQueueCommand={queueDroneCommand}
             pendingCommands={pendingCommands}
             uplinkTime={uplinkTime}
+            onAddDrone={addDrone}
+            onRemoveDrone={removeDrone}
           />
         ) : (
           <KillChainPanel
