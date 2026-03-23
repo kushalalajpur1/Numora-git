@@ -1,0 +1,157 @@
+/* Tactical map */
+.tactical-map-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 8px;
+  height: 260px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tactical-map {
+  border-radius: 2px;
+  cursor: crosshair;
+}
+
+/* Drone cards */
+.drone-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.drone-card {
+  background: var(--bg-card);
+  border: 1px solid;
+  border-color: var(--border);
+  border-radius: 2px;
+  padding: 7px 10px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.drone-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.drone-card__id {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+}
+
+.drone-card__status {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  transition: color 0.3s;
+}
+
+.drone-card__metrics {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.drone-metric {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+}
+
+.drone-metric__label {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.drone-metric__value {
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  min-width: 34px;
+}
+
+.drone-metric__bar {
+  flex: 1;
+  height: 2px;
+  background: var(--bg-elevated);
+  border-radius: 1px;
+}
+
+.drone-metric__bar-fill {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.8s ease, background 0.3s;
+}
+
+/* Control inputs */
+.drone-card__control {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-row label {
+  font-size: 8px;
+  color: var(--text-dim);
+  min-width: 12px;
+}
+
+.control-row input {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  width: 50px;
+}
+
+.control-btn {
+  background: var(--blue);
+  color: var(--bg-primary);
+  border: none;
+  font-size: 9px;
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.control-btn:hover {
+  background: var(--blue-hover);
+}
+
+/* Fleet summary */
+.fleet-summary {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 2px;
+}
+
+.fleet-sum-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.fleet-sum-row:last-child {
+  border-bottom: none;
+}
