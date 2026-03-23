@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: numora
+    env: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
