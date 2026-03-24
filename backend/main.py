@@ -440,6 +440,13 @@ async def _maybe_detect_contact(drone_id: str, base_confidence: float):
     print(f"[{drone_id}] Contact {contact_id} stored in drone memory ({threat_level}, {confidence}% conf) — awaiting relay", flush=True)
 
 
+CONTINUOUS_DURATION = 9999   # sentinel value meaning "run until recalled / low battery"
+
+def _should_continue(start: float, duration: float, drone: dict) -> bool:
+    if duration >= CONTINUOUS_DURATION:
+        return drone["battery"] > 15.0
+    return time.time() - start < duration
+
 # ── Task behaviour helpers ────────────────────────────────────────────────────
 
 async def _travel(drone, sx, sy, tx, ty, speed):
@@ -460,7 +467,7 @@ async def _run_surveillance(drone, tx, ty, duration):
     radius, angle   = 25.0, 0.0
     orbit_steps     = 0
     start = time.time()
-    while time.time() - start < duration:
+    while _should_continue(start, duration, drone):
         angle           += 0.08
         drone["x"]       = tx + math.cos(angle) * radius
         drone["y"]       = ty + math.sin(angle) * radius
@@ -479,7 +486,7 @@ async def _run_patrol(drone, tx, ty, duration):
     sx, sy = drone["x"], drone["y"]
     steps  = 20
     start  = time.time()
-    while time.time() - start < duration:
+    while _should_continue(start, duration, drone):
         for px, py in [(tx, ty), (sx, sy)]:
             ox, oy = drone["x"], drone["y"]
             for step in range(steps):
@@ -499,7 +506,7 @@ async def _run_recon(drone, tx, ty, duration):
     r = 35.0
     waypoints = [(tx+r, ty), (tx, ty+r), (tx-r, ty), (tx, ty-r), (tx, ty)]
     start = time.time()
-    while time.time() - start < duration:
+    while _should_continue(start, duration, drone):
         for wx, wy in waypoints:
             ox, oy = drone["x"], drone["y"]
             for step in range(8):
@@ -519,7 +526,7 @@ async def _run_mine_detection(drone, tx, ty, duration):
     drone["status"] = DroneStatus.SCANNING
     area, rows = 40.0, 4
     start = time.time()
-    while time.time() - start < duration:
+    while _should_continue(start, duration, drone):
         for row in range(rows):
             y_pos   = ty - area + row * (area * 2 / max(rows - 1, 1))
             x_start = tx - area if row % 2 == 0 else tx + area

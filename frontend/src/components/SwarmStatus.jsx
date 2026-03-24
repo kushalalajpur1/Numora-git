@@ -37,14 +37,14 @@ const STATUS_ICON = {
 }
 
 const TASK_TYPES = ['SURVEILLANCE', 'PERIMETER PATROL', 'RECON', 'MINE DETECTION']
+const CONTINUOUS = 9999
 
-const DURATION_OPTIONS = [
-  { label: '30s',  value: 30  },
-  { label: '1m',   value: 60  },
-  { label: '2m',   value: 120 },
-  { label: '5m',   value: 300 },
-  { label: '10m',  value: 600 },
-]
+function fmtDuration(s) {
+  if (s >= CONTINUOUS) return '∞ CONTINUOUS'
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60), r = s % 60
+  return r ? `${m}m ${r}s` : `${m}m`
+}
 
 
 function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, mothership, taskType, duration, onTaskChange, onRemove }) {
@@ -185,23 +185,37 @@ function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, m
           {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
-        <div style={{ display: 'flex', gap: '5px', alignItems: 'center', marginBottom: '5px' }}>
-          <span style={{ fontSize: '9px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>HOLD:</span>
-          {DURATION_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={e => { e.stopPropagation(); onTaskChange(taskType, opt.value) }}
-              style={{
-                flex: 1, padding: '2px 0', fontSize: '9px', fontFamily: 'inherit',
-                background: duration === opt.value ? 'rgba(0,255,136,0.15)' : 'var(--bg-card)',
-                border: `1px solid ${duration === opt.value ? 'var(--green)' : 'var(--border)'}`,
-                color: duration === opt.value ? 'var(--green)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        {/* Duration slider */}
+        <div style={{ marginBottom: '5px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+            <span style={{ fontSize: '9px', color: 'var(--text-secondary)', letterSpacing: '0.08em' }}>HOLD DURATION</span>
+            <span style={{ fontSize: '10px', color: duration >= CONTINUOUS ? 'var(--amber)' : 'var(--green)', fontWeight: 700, letterSpacing: '0.06em' }}>
+              {fmtDuration(duration)}
+            </span>
+          </div>
+          <input
+            type="range" min={30} max={600} step={10}
+            value={Math.min(duration, 600)}
+            disabled={duration >= CONTINUOUS}
+            onChange={e => onTaskChange(taskType, Number(e.target.value))}
+            style={{ width: '100%', accentColor: 'var(--green)', opacity: duration >= CONTINUOUS ? 0.3 : 1 }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', color: 'var(--text-dim)', marginTop: '1px' }}>
+            <span>30s</span><span>2m</span><span>5m</span><span>10m</span>
+          </div>
+          {/* Continuous toggle */}
+          <button
+            onClick={() => onTaskChange(taskType, duration >= CONTINUOUS ? 60 : CONTINUOUS)}
+            style={{
+              width: '100%', marginTop: '5px', padding: '3px', fontFamily: 'inherit',
+              fontSize: '9px', letterSpacing: '0.1em', cursor: 'pointer', borderRadius: '2px',
+              background: duration >= CONTINUOUS ? 'rgba(255,179,71,0.12)' : 'transparent',
+              border: `1px solid ${duration >= CONTINUOUS ? 'var(--amber)' : 'var(--border)'}`,
+              color: duration >= CONTINUOUS ? 'var(--amber)' : 'var(--text-dim)',
+            }}
+          >
+            {duration >= CONTINUOUS ? '∞ CONTINUOUS — until recalled' : '∞ SET CONTINUOUS'}
+          </button>
         </div>
 
         {coordError && (
