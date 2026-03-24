@@ -98,6 +98,7 @@ class NUMORAState:
                 "target_x": 0.0,
                 "target_y": 0.0,
                 "kill_chain_stage": None,
+                "unrelayed_contacts": [],   # contacts detected but not yet handed to mothership
             }
             for i in range(1, 6)
         }
@@ -125,9 +126,16 @@ class NUMORAState:
         self.contacts: dict = {}                   # contact_id -> contact dict
         self._contact_counter: int = 0
         self._drone_detect_times: dict = {}        # drone_id -> last detection timestamp
+        self.pending_contacts: list = []           # contacts handed to mothership, awaiting surface relay
 
 state = NUMORAState()
 connected_clients: list[WebSocket] = []
+
+def _drone_for_client(drone: dict) -> dict:
+    """Strip internal-only fields before sending drone state to frontend."""
+    d = {k: v for k, v in drone.items() if k != "unrelayed_contacts"}
+    d["unrelayed_count"] = len(drone.get("unrelayed_contacts", []))
+    return d
 
 # ─── Broadcast ───────────────────────────────────────────────────────────────
 
@@ -231,9 +239,18 @@ async def mothership_loop():
                 ms["signal_strength"] = 1.0
 
                 await broadcast("drone_uplink", {
-                    "drones": list(state.drones.values()),
+                    "drones": [_drone_for_client(d) for d in state.drones.values()],
                     "uplink_time": time.strftime("%H:%M:%S"),
                 })
+
+                # Relay any pending contact reports to operator via satellite uplink
+                if state.pending_contacts:
+                    relayed = list(state.pending_contacts)
+                    state.pending_contacts = []
+                    for contact in relayed:
+                        state.contacts[contact["contact_id"]] = contact
+                        await broadcast("contact_detected", contact)
+                    print(f"[MS] Relayed {len(relayed)} contact report(s) to operator", flush=True)
 
                 if state.mission_queue:
                     state.queued_relay_list = list(state.mission_queue)
@@ -415,8 +432,12 @@ async def _maybe_detect_contact(drone_id: str, base_confidence: float):
         "status":       "PENDING",
         "detected_at":  time.strftime("%H:%M:%S", time.localtime()),
     }
-    state.contacts[contact_id] = contact
-    await broadcast("contact_detected", contact)
+
+    # Contact stored in drone's local memory — NOT broadcast yet.
+    # Drone must return to mothership acoustically, then mothership relays
+    # to operator during the next surface window.
+    drone["unrelayed_contacts"].append(contact)
+    print(f"[{drone_id}] Contact {contact_id} stored in drone memory ({threat_level}, {confidence}% conf) — awaiting relay", flush=True)
 
 
 # ── Task behaviour helpers ────────────────────────────────────────────────────
@@ -549,6 +570,24 @@ async def animate_drone(drone_id: str, command: dict):
     drone["x"]      = 0.0
     drone["y"]      = 0.0
     drone["status"] = DroneStatus.IDLE
+
+    # Acoustic handoff: drone transfers contact reports to mothership on return
+    if drone["unrelayed_contacts"]:
+        count = len(drone["unrelayed_contacts"])
+        state.pending_contacts.extend(drone["unrelayed_contacts"])
+        drone["unrelayed_contacts"] = []
+        log_entry = {
+            "id": len(state.mission_log) + 1,
+            "type": "ACOUSTIC HANDOFF",
+            "target": f"{drone_id} → MOTHERSHIP",
+            "priority": "—",
+            "drones": 1,
+            "ts": time.strftime("%H:%M:%S"),
+            "status": f"{count} contact report(s) stored — relay on next surface window",
+        }
+        state.mission_log = [log_entry] + state.mission_log[:9]
+        await broadcast("mission_log_update", {"log": state.mission_log})
+        print(f"[{drone_id}] Acoustic handoff: {count} contact(s) transferred to mothership", flush=True)
 
 
 IDLE_STATUSES = {DroneStatus.IDLE, DroneStatus.ON_STATION}
@@ -765,7 +804,7 @@ async def websocket_endpoint(ws: WebSocket):
         "type": "init",
         "data": {
             "mothership": state.mothership,
-            "drones": list(state.drones.values()),
+            "drones": [_drone_for_client(d) for d in state.drones.values()],
             "mission_log": state.mission_log,
             "mission_queue": state.mission_queue,
             "scheduled_ascent_time": state.scheduled_ascent_time,
@@ -1006,7 +1045,7 @@ async def websocket_endpoint(ws: WebSocket):
                     }))
 
             elif msg.get("type") == "add_drone":
-                if len(state.drones) >= 20:
+                if len(state.drones) >= 10:
                     await ws.send_text(json.dumps({
                         "type": "ack",
                         "data": {"message": "MAX SWARM SIZE REACHED (10 UNITS)"},
@@ -1024,10 +1063,11 @@ async def websocket_endpoint(ws: WebSocket):
                         "y":               0.0,
                         "target_x":        0.0,
                         "target_y":        0.0,
-                        "kill_chain_stage": None,
+                        "kill_chain_stage":   None,
+                        "unrelayed_contacts": [],
                     }
                     state.drones[new_id] = new_drone
-                    await broadcast("drone_added", new_drone)
+                    await broadcast("drone_added", _drone_for_client(new_drone))
                     await ws.send_text(json.dumps({
                         "type": "ack",
                         "data": {"message": f"{new_id} DEPLOYED TO SWARM"},
@@ -1076,7 +1116,7 @@ async def websocket_endpoint(ws: WebSocket):
                     drone["target_x"] = x
                     drone["target_y"] = y
                     drone["status"]   = DroneStatus.TASKED
-                    await broadcast("drone_update", drone)
+                    await broadcast("drone_update", _drone_for_client(drone))
                     asyncio.create_task(animate_drone(drone_id, {
                         "task_type":    data.get("task_type", "SURVEILLANCE"),
                         "hold_duration": float(data.get("hold_duration", 20)),

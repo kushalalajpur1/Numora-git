@@ -234,8 +234,8 @@ export default function KillChainPanel({ killChains, contacts = [], onTriggerKil
             color: 'var(--text-dim)', textAlign: 'center',
           }}>
             <div style={{ fontSize: '28px', opacity: 0.25 }}>◎</div>
-            <div style={{ fontSize: '10px', letterSpacing: '0.15em' }}>NO CONTACTS DETECTED</div>
-            <div style={{ fontSize: '9px', opacity: 0.6 }}>Deploy drones on surveillance or patrol missions to begin area scanning</div>
+            <div style={{ fontSize: '10px', letterSpacing: '0.15em' }}>NO CONTACTS RELAYED</div>
+            <div style={{ fontSize: '9px', opacity: 0.6 }}>Contacts detected by drones are stored onboard and relayed to you during the next surface window</div>
           </div>
         )}
 

@@ -47,7 +47,7 @@ const DURATION_OPTIONS = [
 ]
 
 
-function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, mothership, taskType, duration, onTaskChange }) {
+function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, mothership, taskType, duration, onTaskChange, onRemove }) {
   const color  = STATUS_COLORS[drone.status] || 'var(--text-secondary)'
   const anim   = STATUS_ANIM[drone.status]   || 'none'
   const battColor = drone.battery > 40 ? 'var(--green)' : drone.battery > 20 ? 'var(--amber)' : 'var(--red)'
@@ -97,10 +97,38 @@ function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, m
       {/* Header */}
       <div className="drone-card__header">
         <span className="drone-card__id">{isSelected ? '▶ ' : ''}{drone.id}</span>
-        <span className="drone-card__status" style={{ color }}>
-          {STATUS_ICON[drone.status] || '○'} {drone.status}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span className="drone-card__status" style={{ color }}>
+            {STATUS_ICON[drone.status] || '○'} {drone.status}
+          </span>
+          <button
+            title={drone.status !== 'IDLE' ? 'Can only remove idle drones' : 'Remove from swarm'}
+            disabled={drone.status !== 'IDLE'}
+            onClick={e => { e.stopPropagation(); onRemove(drone.id) }}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              color: drone.status === 'IDLE' ? 'var(--red)' : 'var(--border)',
+              cursor: drone.status === 'IDLE' ? 'pointer' : 'not-allowed',
+              fontSize: '9px', padding: '1px 5px', borderRadius: '2px',
+              fontFamily: 'inherit', lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        </div>
       </div>
+
+      {/* Unrelayed contacts stored onboard */}
+      {drone.unrelayed_count > 0 && (
+        <div style={{
+          fontSize: '8px', letterSpacing: '0.1em', padding: '2px 5px',
+          background: 'rgba(255,179,71,0.08)', border: '1px solid rgba(255,179,71,0.35)',
+          color: 'var(--amber)', marginBottom: '4px', textAlign: 'center',
+        }}>
+          ◉ {drone.unrelayed_count} CONTACT{drone.unrelayed_count > 1 ? 'S' : ''} STORED — AWAITING RELAY
+        </div>
+      )}
 
       {/* Kill chain stage indicator */}
       {drone.kill_chain_stage && (
@@ -210,7 +238,7 @@ function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, m
 }
 
 
-export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMothershipWaypoint, onQueueCommand, pendingCommands, uplinkTime }) {
+export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMothershipWaypoint, onQueueCommand, pendingCommands, uplinkTime, onAddDrone, onRemoveDrone }) {
   const [selectedDroneId, setSelectedDroneId] = useState(null)
   const [droneTaskSettings, setDroneTaskSettings] = useState({})
   const active = drones.filter(d => d.status !== 'IDLE').length
@@ -233,9 +261,25 @@ export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMoth
     <div className="panel">
       <div className="panel__header">
         <span className="panel__title">SWARM NODES</span>
-        <span className="panel__badge" style={{ color: active > 0 ? 'var(--amber)' : 'var(--text-secondary)', borderColor: active > 0 ? 'var(--amber)' : 'var(--text-secondary)' }}>
-          {active}/{drones.length} ACTIVE
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span className="panel__badge" style={{ color: active > 0 ? 'var(--amber)' : 'var(--text-secondary)', borderColor: active > 0 ? 'var(--amber)' : 'var(--text-secondary)' }}>
+            {active}/{drones.length} ACTIVE
+          </span>
+          <button
+            onClick={onAddDrone}
+            disabled={drones.length >= 10}
+            title={drones.length >= 10 ? 'Max swarm size reached (10)' : 'Deploy new drone'}
+            style={{
+              background: 'rgba(0,255,136,0.08)', border: '1px solid var(--green)',
+              color: drones.length >= 10 ? 'var(--text-dim)' : 'var(--green)',
+              fontFamily: 'inherit', fontSize: '9px', letterSpacing: '0.1em',
+              padding: '2px 8px', cursor: drones.length >= 10 ? 'not-allowed' : 'pointer',
+              borderRadius: '2px',
+            }}
+          >
+            + ADD
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: '4px 10px', fontSize: '9px', letterSpacing: '0.1em', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}>
@@ -281,6 +325,7 @@ export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMoth
               taskType={getTaskSettings(d.id).taskType}
               duration={getTaskSettings(d.id).duration}
               onTaskChange={(t, dur) => handleTaskChange(d.id, t, dur)}
+              onRemove={onRemoveDrone}
             />
           ))}
         </div>
