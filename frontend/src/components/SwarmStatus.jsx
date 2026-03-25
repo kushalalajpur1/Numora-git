@@ -252,7 +252,7 @@ function DroneCard({ drone, onQueueCommand, isSelected, onSelect, pendingTask, m
 }
 
 
-export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMothershipWaypoint, onQueueCommand, pendingCommands, uplinkTime, onAddDrone, onRemoveDrone }) {
+export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMothershipWaypoint, onQueueCommand, pendingCommands, uplinkTime, onAddDrone, onRemoveDrone, contacts = [] }) {
   const [selectedDroneId, setSelectedDroneId] = useState(null)
   const [droneTaskSettings, setDroneTaskSettings] = useState({})
   const active = drones.filter(d => d.status !== 'IDLE').length
@@ -318,6 +318,7 @@ export default function SwarmStatus({ drones, mothership, onSetTarget, onSetMoth
           <TacticalMapLeaflet
             drones={drones}
             mothership={mothership}
+            contacts={contacts}
             selectedDroneId={selectedDroneId}
             onSelectDrone={handleSelectDrone}
             onSetTarget={handleSetTarget}

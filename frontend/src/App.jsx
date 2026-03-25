@@ -392,6 +392,7 @@ export default function App() {
             uplinkTime={uplinkTime}
             onAddDrone={addDrone}
             onRemoveDrone={removeDrone}
+            contacts={contacts}
           />
         ) : (
           <KillChainPanel

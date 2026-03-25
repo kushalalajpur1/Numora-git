@@ -74,6 +74,29 @@ function makeMothershipIcon(isMoving) {
   })
 }
 
+const THREAT_HEX = {
+  LOW:      '#00ff88',
+  MEDIUM:   '#ffb347',
+  HIGH:     '#ffb347',
+  CRITICAL: '#ff4444',
+}
+
+function makeContactIcon(threatLevel, status) {
+  const c = THREAT_HEX[threatLevel] || '#ffb347'
+  const dim = status === 'DISMISSED' || status === 'ENGAGED'
+  const opacity = dim ? 0.35 : 1
+  return L.divIcon({
+    className: '',
+    html: `<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" opacity="${opacity}">
+      <circle cx="16" cy="16" r="13" fill="${c}18" stroke="${c}" stroke-width="1.5" stroke-dasharray="3,2"/>
+      <line x1="16" y1="4"  x2="16" y2="28" stroke="${c}" stroke-width="1.2" opacity="0.7"/>
+      <line x1="4"  y1="16" x2="28" y2="16" stroke="${c}" stroke-width="1.2" opacity="0.7"/>
+      <rect x="11" y="11" width="10" height="10" fill="${c}33" stroke="${c}" stroke-width="1.5" transform="rotate(45 16 16)"/>
+    </svg>`,
+    iconSize: [32, 32], iconAnchor: [16, 16],
+  })
+}
+
 function makeWaypointIcon() {
   return L.divIcon({
     className: '',
@@ -118,12 +141,13 @@ function injectCSS() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function TacticalMapLeaflet({
-  drones, mothership,
+  drones, mothership, contacts = [],
   selectedDroneId, onSelectDrone, onSetTarget, onSetMothershipWaypoint,
 }) {
   const containerRef          = useRef(null)
   const mapRef                = useRef(null)
   const markersRef            = useRef({})
+  const contactMarkersRef     = useRef({})
   const msMarkerRef           = useRef(null)
   const msWaypointRef         = useRef(null)
   const msRouteLineRef        = useRef(null)
@@ -184,6 +208,7 @@ export default function TacticalMapLeaflet({
       map.remove()
       mapRef.current = null
       markersRef.current = {}
+      contactMarkersRef.current = {}
       msMarkerRef.current = null
       msWaypointRef.current = null
       msRouteLineRef.current = null
@@ -264,6 +289,45 @@ export default function TacticalMapLeaflet({
       if (!seen.has(id)) { markersRef.current[id].remove(); delete markersRef.current[id] }
     })
   }, [drones, selectedDroneId])
+
+  // ── Contact markers ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    const seen = new Set()
+    contacts.forEach(contact => {
+      const [lat, lng] = toLatLng(contact.x, contact.y)
+      seen.add(contact.contact_id)
+
+      const icon = makeContactIcon(contact.threat_level, contact.status)
+      const tip  = [
+        `<b>${contact.contact_id}</b>`,
+        `THREAT: ${contact.threat_level}`,
+        `CONFIDENCE: ${contact.confidence}%`,
+        `DETECTED: ${contact.detected_at}`,
+        `BY: ${contact.drone_id}`,
+        contact.status !== 'PENDING' ? `STATUS: ${contact.status}` : '',
+      ].filter(Boolean).join('<br/>')
+
+      if (contactMarkersRef.current[contact.contact_id]) {
+        contactMarkersRef.current[contact.contact_id].setLatLng([lat, lng])
+        contactMarkersRef.current[contact.contact_id].setIcon(icon)
+        contactMarkersRef.current[contact.contact_id].setTooltipContent(tip)
+      } else {
+        const marker = L.marker([lat, lng], { icon, zIndexOffset: 500 }).addTo(map)
+        marker.bindTooltip(tip, { className: 'numora-tip', direction: 'top', offset: [0, -16] })
+        contactMarkersRef.current[contact.contact_id] = marker
+      }
+    })
+
+    Object.keys(contactMarkersRef.current).forEach(id => {
+      if (!seen.has(id)) {
+        contactMarkersRef.current[id].remove()
+        delete contactMarkersRef.current[id]
+      }
+    })
+  }, [contacts])
 
   // ── Cursor style ──────────────────────────────────────────────────────────
   useEffect(() => {
