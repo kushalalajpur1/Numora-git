@@ -242,8 +242,21 @@ export default function KillChainPanel({ killChains, contacts = [], onTriggerKil
         {/* Pending contacts awaiting operator decision */}
         {pending.length > 0 && (
           <div style={{ marginBottom: '8px' }}>
-            <div className="section-label" style={{ marginBottom: '6px', color: 'var(--amber)', letterSpacing: '0.2em', animation: 'pulse-amber 1.5s ease-in-out infinite' }}>
-              ⚠ CONTACTS AWAITING ASSESSMENT
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <div className="section-label" style={{ color: 'var(--amber)', letterSpacing: '0.2em', animation: 'pulse-amber 1.5s ease-in-out infinite' }}>
+                ⚠ CONTACTS AWAITING ASSESSMENT
+              </div>
+              <button
+                onClick={() => pending.forEach(c => onDismissContact(c.contact_id))}
+                style={{
+                  background: 'transparent', border: '1px solid var(--border)',
+                  color: 'var(--text-dim)', fontFamily: 'inherit',
+                  fontSize: '8px', letterSpacing: '0.1em',
+                  padding: '2px 7px', cursor: 'pointer', borderRadius: '2px',
+                }}
+              >
+                DISMISS ALL
+              </button>
             </div>
             {pending.map(c => (
               <ContactCard
